@@ -1,62 +1,78 @@
-from django.http import Http404
-from django.shortcuts import render
+from django.shortcuts import get_object_or_404, render
+from django.utils import timezone
+
+from .models import Category, Post
+
+POSTS_LIMIT = 5
 
 
-posts = [
-    {
-        'id': 0,
-        'location': 'Остров отчаянья',
-        'date': '30 сентября 1659 года',
-        'category': 'travel',
-        'text': '''Наш корабль, застигнутый в открытом море
-                страшным штормом, потерпел крушение.
-                Весь экипаж, кроме меня, утонул; я же,
-                несчастный Робинзон Крузо, был выброшен
-                полумёртвым на берег этого проклятого острова,
-                который назвал островом Отчаяния.''',
-    },
-    {
-        'id': 1,
-        'location': 'Остров отчаянья',
-        'date': '1 октября 1659 года',
-        'category': 'not-my-day',
-        'text': '''Проснувшись поутру, я увидел, что наш корабль сняло
-                с мели приливом и пригнало гораздо ближе к берегу.
-                Это подало мне надежду, что, когда ветер стихнет,
-                мне удастся добраться до корабля и запастись едой и
-                другими необходимыми вещами. Я немного приободрился,
-                хотя печаль о погибших товарищах не покидала меня.
-                Мне всё думалось, что, останься мы на корабле, мы
-                непременно спаслись бы. Теперь из его обломков мы могли бы
-                построить баркас, на котором и выбрались бы из этого
-                гиблого места.''',
-    },
-    {
-        'id': 2,
-        'location': 'Остров отчаянья',
-        'date': '25 октября 1659 года',
-        'category': 'not-my-day',
-        'text': '''Всю ночь и весь день шёл дождь и дул сильный
-                порывистый ветер. 25 октября.  Корабль за ночь разбило
-                в щепки; на том месте, где он стоял, торчат какие-то
-                жалкие обломки,  да и те видны только во время отлива.
-                Весь этот день я хлопотал  около вещей: укрывал и
-                укутывал их, чтобы не испортились от дождя.''',
-    },
-]
+def get_published_posts():
+    """Возвращает queryset опубликованных постов.
+
+    Условия публикации:
+    - флаг is_published равен True;
+    - категория поста существует и опубликована (is_published=True);
+    - дата публикации pub_date не позже текущего времени (timezone.now()).
+    Использует select_related для оптимизации запросов к связанным моделям.
+    """
+    return Post.objects.select_related(
+        'category',
+        'location',
+        'author'
+    ).filter(
+        is_published=True,
+        category__is_published=True,
+        pub_date__lte=timezone.now()
+    )
 
 
 def index(request):
-    return render(request, 'blog/index.html', {'posts': posts[::-1]})
+    """Главная страница сайта.
+
+    Отображает пять последних опубликованных постов.
+    """
+    post_list = get_published_posts()[:POSTS_LIMIT]
+    return render(request, 'blog/index.html', {'post_list': post_list})
 
 
 def post_detail(request, id):
-    for post in posts:
-        if post['id'] == id:
-            return render(request, 'blog/detail.html', {'post': post})
-    raise Http404('Публикация не найдена.')
+    """Страница отдельной публикации.
+
+    Возвращает пост по первичному ключу.
+    Если пост не опубликован, снята с публикации его категория,
+    дата публикации в будущем или пост не найден — возвращает 404.
+    """
+    post = get_object_or_404(
+        get_published_posts(),
+        pk=id
+    )
+    return render(request, 'blog/detail.html', {'post': post})
 
 
 def category_posts(request, category_slug):
-    return render(request, 'blog/category.html',
-                  {'category_slug': category_slug})
+    """Страница публикаций выбранной категории.
+
+    Возвращает только опубликованные посты выбранной категории.
+    Если категория снята с публикации или не существует — возвращает 404.
+    """
+    category = get_object_or_404(
+        Category,
+        slug=category_slug,
+        is_published=True
+    )
+    post_list = category.posts.select_related(
+        'category',
+        'location',
+        'author'
+    ).filter(
+        is_published=True,
+        pub_date__lte=timezone.now()
+    )
+    return render(
+        request,
+        'blog/category.html',
+        {
+            'category': category,
+            'post_list': post_list,
+        }
+    )
